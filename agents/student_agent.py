@@ -27,4 +27,17 @@ class StudentAgent(Agent):
         # helpers.get_valid_moves / check_winner already respect them; your own
         # move generator and evaluation function must too.
         # TODO: replace with your search. Keep (time.perf_counter() - start) < STEP_TIME_LIMIT - margin.
+
+        def alphabeta(board, reserves, player_to_move, depth, alpha, beta, maximizing):
+            return 0
+
+        def get_best_move(board, reserves, player, opponent):
+            best_val, best_move = -np.inf, None
+            for move in get_valid_moves(board, reserves, player):
+                execute_move(board, reserves, player, move)
+                val = alphabeta(board, reserves, opponent, 10, -np.inf, np.inf, False)
+                if val > best_val:
+                    best_val, move = val, move
+            return move
+
         return random_move(board, reserves, player)
