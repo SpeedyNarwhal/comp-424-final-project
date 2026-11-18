@@ -7,8 +7,11 @@ from constants import *
 import numpy as np
 import time
 
-DEPTH = 2       # TODO: implement actual incrementing
+MAX_DEPTH = 10
 WIN = 10 ** 6   # score heuristic value
+
+MARGIN = 0.2    # TODO: establish a good margin (do this at the end)
+class SearchTimeout(Exception): pass
 
 LINES = ([[(i, j) for j in range(BOARD_SIZE)] for i in range(BOARD_SIZE)] + # 4 rows
         [[(j, i) for j in range(BOARD_SIZE)] for i in range(BOARD_SIZE)] + # 4 cols
@@ -23,6 +26,8 @@ class StudentAgent(Agent):
         super().__init__()
         self.name = "StudentAgent"
         self.turn_count = 0
+
+        # TODO: Take advantage of this 30 seconds to set up agent
 
     def step(self, board, reserves, player, opponent):
         """Return the Move you want to play.
@@ -40,8 +45,14 @@ class StudentAgent(Agent):
         root_ply = 2 * self.turn_count + player - 1
         self.turn_count += 1
 
+        deadline = start + STEP_TIME_LIMIT - MARGIN
+        def check_time(): 
+            if time.perf_counter() >= deadline: raise SearchTimeout()
+
         # TODO: currently does not consider piece sizes & reserves
         def evaluate(board, reserves, player, opponent):
+            check_time()
+
             owners, sizes = top_view(board)
             score = 0
 
@@ -57,10 +68,11 @@ class StudentAgent(Agent):
             return score
 
         def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply=0):
+            check_time()
 
             current_player = player if maximizing else opponent
 
-            is_over, winner, reason = check_endgame(board, reserves, current_player, ply)
+            is_over, winner, _ = check_endgame(board, reserves, current_player, ply)
             if is_over:
                 if winner == player:
                     return WIN + depth
@@ -69,13 +81,18 @@ class StudentAgent(Agent):
                 else:
                     return 0
 
+            check_time()
             valid_moves = get_valid_moves(board, reserves, current_player)
+            # TODO: Cut moves that are probably not getting chosen. 
+            # Maybe sort by evaluation function output value and cut after a certain threshold.
 
+            check_time()
             if depth == 0 or not valid_moves:
                 return evaluate(board, reserves, player, opponent)
 
             if maximizing:
                 for move in valid_moves:
+                    check_time()
                     b, r = copy_state(board, reserves)
                     execute_move(b, r, current_player, move)
                     value = alphabeta(b, r, player, opponent, depth-1, alpha, beta, False, ply + 1)
@@ -84,28 +101,42 @@ class StudentAgent(Agent):
                 return alpha
             else:
                 for move in valid_moves:
+                    check_time()
                     b, r = copy_state(board, reserves)
                     execute_move(b, r, current_player, move)
                     beta = min(beta, alphabeta(b, r, player, opponent, depth - 1, alpha, beta, True, ply + 1))
                     if alpha >= beta: return alpha
                 return beta
 
-        # TODO: implement 2 second time cutoff
         def get_best_move(board, reserves, player, opponent, depth):
             best_val, best_move = -np.inf, None
             for move in get_valid_moves(board, reserves, player):
+                # TODO: Cut moves that are probably not getting chosen. 
+                # Maybe sort by evaluation function output value and cut after a certain threshold.
+                
+                check_time()
+
                 b, r = copy_state(board, reserves)
                 execute_move(b, r, player, move)
                 winner = check_winner(b, player)
                 if winner == player:
-                    return move
+                    return WIN + depth, move
                 elif winner == opponent:
                     val = -WIN - depth
                 else:
                     val = alphabeta(b, r, player, opponent, depth-1, -np.inf, np.inf, False, root_ply + 1)
                 if val > best_val:
                     best_val, best_move = val, move
-            return best_move
+            return best_val, best_move
 
-        move = get_best_move(board, reserves, player, opponent, DEPTH)
-        return move if move else random_move(board, reserves, player)
+        # TODO: Want the val of a move to be the deepest (a move can look good at depth 1 but bad at depth 3)
+        best_val, best_move = -np.inf, None
+        try:
+            for depth in range(2, MAX_DEPTH + 1):
+                check_time()
+                val, move = get_best_move(board, reserves, player, opponent, depth)
+                if val > best_val: best_val, best_move = val, move
+        except SearchTimeout:
+            pass
+
+        return best_move if best_move else random_move(board, reserves, player)
