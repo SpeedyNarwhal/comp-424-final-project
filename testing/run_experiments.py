@@ -7,6 +7,9 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import simulator
+import random
+
+RESULTS_DIR = PROJECT_ROOT / "testing" / "results"
 
 def run_simulation(player, opponent, num_runs, seed):
     """Run a series of games between the given player and opponent agents."""
@@ -22,8 +25,10 @@ def run_simulation(player, opponent, num_runs, seed):
 
 if __name__ == "__main__":
 
-    run_simulation("student_agent", "random_agent", num_runs=10, seed=67)
+    seed = random.randint(0, 10000)
 
-    run_simulation("student_agent", "greedy_agent", num_runs=10, seed=67)
+    #run_simulation("student_agent", "random_agent", num_runs=10, seed=seed)
 
-    run_simulation("student_agent", "student_agent", num_runs=10, seed=67)
+    run_simulation("student_agent", "greedy_agent", num_runs=50, seed=seed)
+
+    #run_simulation("student_agent", "student_agent", num_runs=10, seed=seed)

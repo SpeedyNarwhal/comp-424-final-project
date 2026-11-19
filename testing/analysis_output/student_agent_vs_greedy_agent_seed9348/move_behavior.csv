@@ -1,0 +1,7 @@
+move_type,piece_size,count
+Board move,Large,52
+Board move,Medium,33
+Board move,Small,20
+Placement,Large,24
+Placement,Medium,26
+Placement,Small,27
