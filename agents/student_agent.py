@@ -131,11 +131,14 @@ class StudentAgent(Agent):
 
         # TODO: Want the val of a move to be the deepest (a move can look good at depth 1 but bad at depth 3)
         best_val, best_move = -np.inf, None
+        values = {best_move: best_val}
         try:
             for depth in range(2, MAX_DEPTH + 1):
                 check_time()
                 val, move = get_best_move(board, reserves, player, opponent, depth)
-                if val > best_val: best_val, best_move = val, move
+                values[move] = val
+                best_move = max(values, key=values.get)
+                best_val = values[best_move]
         except SearchTimeout:
             pass
 
