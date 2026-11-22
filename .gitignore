@@ -25,5 +25,6 @@
 !/agents/greedy_agent.py
 !/agents/human_agent.py
 !/agents/student_agent.py
+!/agents/student_agent_2.py
 
 !/game_rules.txt
