@@ -205,7 +205,7 @@ class StudentAgent(Agent):
                         return alpha
                 return beta
 
-        def get_best_move(board, reserves, player, opponent, depth, stats):
+        def get_best_move(board, reserves, player, opponent, depth, stats, available_scores):
             best_val, best_move = -np.inf, None
             timed_out = False
 
@@ -239,6 +239,9 @@ class StudentAgent(Agent):
 
                 stats["root_moves_considered"] += 1
 
+                # Update this move's latest fully evaluated score.
+                available_scores[repr(move)] = (move, val, depth)
+
                 stats["root_move_scores"].append({
                     "move": repr(move),
                     "score": float(val),
@@ -265,6 +268,7 @@ class StudentAgent(Agent):
         completed_depth = 0
         attempted_depth = None
         timed_out = False
+        available_scores = {}
 
         for depth in range(2, MAX_DEPTH + 1):
             iteration_start = time.perf_counter()
@@ -273,7 +277,7 @@ class StudentAgent(Agent):
 
             try:
                 check_time()
-                val, move, iteration_completed = get_best_move(board, reserves, player, opponent, depth, stats)
+                val, move, iteration_completed = get_best_move(board, reserves, player, opponent, depth, stats, available_scores)
 
             except SearchTimeout:
                 # Timeout happened before get_best_move could start
@@ -292,9 +296,8 @@ class StudentAgent(Agent):
                 # Depth didnt complete, only use result if better than previous depth's best move
                 timed_out = True
 
-                if move is not None and val > best_val:
-                    best_val, best_move = val, move
-                    best_move_depth = depth
+                if available_scores:
+                    best_move, best_val, best_move_depth = max(available_scores.values(), key=lambda x: x[1])
 
                 stats["completed"] = False
 
