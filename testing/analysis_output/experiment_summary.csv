@@ -1,4 +1,5 @@
 experiment,opponent(s),games,wins,draws,losses,match_points_pct,p1_match_points_pct,p2_match_points_pct,mean_step_time_s,median_step_time_s,p95_step_time_s,max_step_time_s,mean_game_plies,strikes,forfeits
+student_agent_vs_greedy_agent_seed7520.jsonl,greedy_agent,2,2,0,0,100.0,100.0,100.0,1.8001,1.8001,1.8001,1.8002,38.5,0,0
 student_agent_vs_greedy_agent_seed8920.jsonl,greedy_agent,50,46,4,0,96.0,96.0,96.0,1.7767,1.8,1.8001,1.8002,34.86,0,0
 student_agent_vs_greedy_agent_seed9348.jsonl,greedy_agent,10,9,1,0,95.0,100.0,90.0,1.7903,1.8,1.8001,1.8002,35.9,0,0
 student_agent_vs_random_agent_seed9348.jsonl,random_agent,10,10,0,0,100.0,100.0,100.0,1.7251,1.8,1.8001,1.8002,13.9,0,0
