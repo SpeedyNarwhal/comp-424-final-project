@@ -10,8 +10,9 @@ import json
 
 MAX_DEPTH = 10
 WIN = 10 ** 6   # score heuristic value
-
 MARGIN = 0.2    # TODO: establish a good margin (do this at the end)
+PIECE_WEIGHT = (1, 3, 6)  # for small, medium & large pieces in reserve, we can tweak this later
+
 class SearchTimeout(Exception): pass
 
 LINES = ([[(i, j) for j in range(BOARD_SIZE)] for i in range(BOARD_SIZE)] + # 4 rows
@@ -109,28 +110,44 @@ class StudentAgent(Agent):
         self.turn_count += 1
 
         deadline = start + STEP_TIME_LIMIT - MARGIN
-        def check_time(): 
+        def check_time():
             if time.perf_counter() >= deadline: raise SearchTimeout()
 
-        # TODO: currently does not consider piece sizes & reserves
+
         def evaluate(board, reserves, player, opponent):
             check_time()
-
             owners, sizes = top_view(board)
-            score = 0
 
+            def biggest_piece(player):
+                """Return size of the biggest piece <player> can still place."""
+                usable = [size for size in (SMALL, MEDIUM, LARGE)
+                          if reserves[player, size] > 0]
+                if ALLOW_MOVES: # movable top pieces on board
+                    usable += sizes[owners == player].tolist()
+                return max(usable, default=-1) # -1 if no valid moves
+
+            def line_score(player, opp, cells):
+                """Value of a line for player."""
+                value = 0
+                for owner, size in cells:
+                    if owner == opp and size >= biggest_piece(player):
+                        return 0 # opp piece that cannot be covered blocks the whole line
+                    else:
+                        # a coverable piece is slightly less valuable
+                        value += 1 if size >= biggest_piece(opp) else 0.75 # can tweak later
+                return 10 ** value
+
+            score = np.dot(reserves[player]-reserves[opponent] * PIECE_WEIGHT)
             for line in LINES:
-                cells = [owners[row, col] for row, col in line]
-                if OBSTACLE in cells:
-                    continue
-                mine, opp = cells.count(player), cells.count(opponent)
-                if mine and not opp:
-                    score += 10 ** mine
-                elif opp and not mine:
-                    score -= 10 ** opp
+                cells = [(owners[row, col], sizes[row, col]) for row, col in line]
+                if all(owner != OBSTACLE for owner, _ in cells):
+                    playerScore = line_score(player, opponent, cells)
+                    oppScore = line_score(opponent, player, cells)
+                    score += playerScore - oppScore
             return score
 
-        def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply, stats):
+
+        def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply=0):
             check_time()
 
             stats["nodes"] += 1
@@ -156,7 +173,7 @@ class StudentAgent(Agent):
 
             check_time()
             valid_moves = get_valid_moves(board, reserves, current_player)
-            # TODO: Cut moves that are probably not getting chosen. 
+            # TODO: Cut moves that are probably not getting chosen.
             # Maybe sort by evaluation function output value and cut after a certain threshold.
 
             check_time()
@@ -174,7 +191,7 @@ class StudentAgent(Agent):
             stats["expanded_nodes"] += 1
             stats["legal_moves_generated"] += len(valid_moves)
             stats["max_branching_factor"] = max(stats["max_branching_factor"], len(valid_moves))
-                
+
             if maximizing:
                 for move_index, move in enumerate(valid_moves, start=1):
                     check_time()
@@ -182,7 +199,7 @@ class StudentAgent(Agent):
                     execute_move(b, r, current_player, move)
                     value = alphabeta(b, r, player, opponent, depth-1, alpha, beta, False, ply + 1, stats)
                     alpha = max(alpha, value)
-                    if alpha >= beta: 
+                    if alpha >= beta:
                         stats["alpha_beta_cutoffs"] += 1
                         stats["children_pruned"] += len(valid_moves) - move_index
                         stats["cutoff_move_index_sum"] += move_index
@@ -196,7 +213,7 @@ class StudentAgent(Agent):
                     b, r = copy_state(board, reserves)
                     execute_move(b, r, current_player, move)
                     beta = min(beta, alphabeta(b, r, player, opponent, depth - 1, alpha, beta, True, ply + 1, stats))
-                    if alpha >= beta: 
+                    if alpha >= beta:
                         stats["alpha_beta_cutoffs"] += 1
                         stats["children_pruned"] += len(valid_moves) - move_index
                         stats["cutoff_move_index_sum"] += move_index
@@ -207,18 +224,15 @@ class StudentAgent(Agent):
 
         def get_best_move(board, reserves, player, opponent, depth, stats, available_scores):
             best_val, best_move = -np.inf, None
-            timed_out = False
-
-            root_moves = get_valid_moves(board, reserves, player)
-            stats["root_legal_moves"] = len(root_moves)
-
-            for move in root_moves:
-                # TODO: Cut moves that are probably not getting chosen. 
+            for move in get_valid_moves(board, reserves, player):
+                # TODO: Cut moves that are probably not getting chosen.
                 # Maybe sort by evaluation function output value and cut after a certain threshold.
+
+                check_time()
 
                 try:
                     check_time()
-                
+
                     stats["root_moves_started"] += 1
 
                     b, r = copy_state(board, reserves)
