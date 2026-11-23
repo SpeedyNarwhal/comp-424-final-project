@@ -137,7 +137,7 @@ class StudentAgent(Agent):
                         value += 1 if size >= biggest_piece(opp) else 0.75 # can tweak later
                 return 10 ** value
 
-            score = np.dot(reserves[player]-reserves[opponent] * PIECE_WEIGHT)
+            score = np.dot(reserves[player] - reserves[opponent], PIECE_WEIGHT)
             for line in LINES:
                 cells = [(owners[row, col], sizes[row, col]) for row, col in line]
                 if all(owner != OBSTACLE for owner, _ in cells):
@@ -147,7 +147,7 @@ class StudentAgent(Agent):
             return score
 
 
-        def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply=0):
+        def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply, stats):
             check_time()
 
             stats["nodes"] += 1
@@ -224,11 +224,14 @@ class StudentAgent(Agent):
 
         def get_best_move(board, reserves, player, opponent, depth, stats, available_scores):
             best_val, best_move = -np.inf, None
-            for move in get_valid_moves(board, reserves, player):
+            timed_out = False
+
+            root_moves = get_valid_moves(board, reserves, player)
+            stats["root_legal_moves"] = len(root_moves)
+
+            for move in root_moves:
                 # TODO: Cut moves that are probably not getting chosen.
                 # Maybe sort by evaluation function output value and cut after a certain threshold.
-
-                check_time()
 
                 try:
                     check_time()
@@ -274,7 +277,7 @@ class StudentAgent(Agent):
 
             return best_val, best_move, not timed_out
 
-        # TODO: Want the val of a move to be the deepest (a move can look good at depth 1 but bad at depth 3)
+        # IDS where we update the val of each move at each depth
         best_val, best_move = -np.inf, None
         best_move_depth = None
 
