@@ -173,8 +173,7 @@ class StudentAgent(Agent):
 
             check_time()
             valid_moves = get_valid_moves(board, reserves, current_player)
-            # TODO: Cut moves that are probably not getting chosen.
-            # Maybe sort by evaluation function output value and cut after a certain threshold.
+            # TODO: Order moves to paximize pruning
 
             check_time()
             if depth == 0 or not valid_moves:
@@ -227,11 +226,12 @@ class StudentAgent(Agent):
             timed_out = False
 
             root_moves = get_valid_moves(board, reserves, player)
+
+            root_moves.sort(key=lambda m: available_scores.get(repr(m), (None, -np.inf, depth))[1], reverse=True)
+
             stats["root_legal_moves"] = len(root_moves)
 
             for move in root_moves:
-                # TODO: Cut moves that are probably not getting chosen.
-                # Maybe sort by evaluation function output value and cut after a certain threshold.
 
                 try:
                     check_time()
@@ -247,7 +247,7 @@ class StudentAgent(Agent):
                     elif winner == opponent:
                         val = -WIN - depth
                     else:
-                        val = alphabeta(b, r, player, opponent, depth-1, -np.inf, np.inf, False, root_ply + 1, stats)
+                        val = alphabeta(b, r, player, opponent, depth-1, best_val, np.inf, False, root_ply + 1, stats)
 
                 except SearchTimeout:
                     # This root move wasnt fully evaluated
