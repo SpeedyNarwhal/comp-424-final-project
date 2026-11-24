@@ -1,4 +1,0 @@
-phase,moves,mean_time_s,median_time_s,p95_time_s,max_time_s
-Opening,288,1.8,1.8,1.8001,1.8002
-Middle,283,1.8,1.8,1.8001,1.8002
-Endgame,312,1.7339,1.8,1.8001,1.8001

@@ -27,4 +27,17 @@
 !/agents/student_agent.py
 !/agents/student_agent_2.py
 
+!/testing/
+/testing/*
+!/testing/analyze_results.py
+!/testing/analyze_agent_logs.py
+!/testing/run_tests.py
+!/testing/agent_logs/
+/testing/agent_logs/*
+!/testing/analysis_output/
+/testing/analysis_output/*
+!/testing/results/
+/testing/results/*
+
+
 !/game_rules.txt

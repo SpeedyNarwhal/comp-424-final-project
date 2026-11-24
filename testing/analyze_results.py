@@ -9,6 +9,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+import analyze_agent_logs
+
 
 # Constants
 
@@ -47,8 +49,13 @@ def load_records(filepath):
     return records
 
 def get_agent_seat(record):
+    players = record.get("players")
+    if not isinstance(players, dict):
+        return None
+
     for seat in ("1", "2"):
-        if record.get("players", {}).get(seat, {}).get("agent") == "student_agent":
+        player_info = players.get(seat)
+        if isinstance(player_info, dict) and player_info.get("agent") == "student_agent":
             return int(seat)
     return None
 
@@ -122,10 +129,30 @@ def analyze_records(records):
         "piece_sizes": Counter(),
         "move_type_by_size": Counter(),
         "opponents": Counter(),
+        "ignored_records": 0,
+        "ignored_record_details": [],
     }
 
-    for record in records:
+    for record_index, record in enumerate(records, start=1):
         agent_seat = get_agent_seat(record)
+
+        if agent_seat is None:
+            stats["ignored_records"] += 1
+            if len(stats["ignored_record_details"]) < 5:
+                players = record.get("players")
+                if isinstance(players, dict):
+                    player_agents = {
+                        seat: (info.get("agent") if isinstance(info, dict) else info)
+                        for seat, info in players.items()
+                    }
+                else:
+                    player_agents = players
+                stats["ignored_record_details"].append({
+                    "record": record_index,
+                    "players": player_agents,
+                })
+            continue
+
         winner = record.get("winner")
 
         outcome, points = get_outcome(winner, agent_seat)
@@ -553,10 +580,19 @@ def main():
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     summary_rows = []
+    analyzed_result_files = []
 
     for filepath in result_files:
         records = load_records(filepath)
         stats = analyze_records(records)
+
+        if stats["ignored_records"]:
+            print(
+                f"Warning: ignored {stats['ignored_records']} record(s) in "
+                f"{filepath.name} because they did not contain student_agent."
+            )
+            for detail in stats["ignored_record_details"]:
+                print(f"  Record {detail['record']}: players={detail['players']}")
 
         if stats["games"] == 0:
             print(f"Skipping {filepath.name}: no completed games involving student_agent.")
@@ -571,12 +607,19 @@ def main():
         write_breakdown_tables(experiment_output, stats)
         make_plots(stats, experiment_output)
 
+        analyzed_result_files.append(filepath)
+
     if summary_rows:
         write_csv(
             OUTPUT_DIR / "experiment_summary.csv",
             summary_rows,
             list(summary_rows[0].keys()),
         )
+
+    if analyzed_result_files:
+        analyze_agent_logs.analyze_experiments(analyzed_result_files, OUTPUT_DIR)
+
+    if summary_rows:
         print("\nAnalysis complete.")
         print(f"Summary CSV and plots saved under: {OUTPUT_DIR}")
 
