@@ -6,6 +6,7 @@ import math
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -19,6 +20,7 @@ RESULTS_DIR = TESTING_DIR / "results"
 OUTPUT_DIR = TESTING_DIR / "analysis_output"
 
 STEP_TIME_LIMIT = 2.0
+MEMORY_LIMIT_MB = 500.0
 
 SIZE_NAMES = {
     0: "Small",
@@ -44,7 +46,14 @@ def load_records(filepath):
 
     with filepath.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
-            records.append(json.loads(line))
+            if not line.strip():
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Invalid JSON in {filepath.name}, line {line_number}: {error}"
+                ) from error
 
     return records
 
@@ -102,6 +111,62 @@ def group_match_points(group):
     return 100 * group["points"] / group["games"]
 
 
+def extract_memory_mb(record, agent_seat):
+    memory_by_seat = record.get("max_rss_mb")
+    if not isinstance(memory_by_seat, dict):
+        return None
+
+    raw_value = memory_by_seat.get(str(agent_seat))
+    if raw_value is None:
+        return None
+
+    try:
+        memory_mb = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(memory_mb) or memory_mb < 0:
+        return None
+
+    return memory_mb
+
+
+def get_memory_metrics(values):
+    if not values:
+        return {
+            "count": 0,
+            "mean_mb": None,
+            "median_mb": None,
+            "p95_mb": None,
+            "min_mb": None,
+            "max_mb": None,
+            "std_mb": None,
+            "mean_budget_pct": None,
+            "max_budget_pct": None,
+            "max_headroom_mb": None,
+            "games_over_budget": 0,
+            "games_over_budget_pct": 0.0,
+        }
+
+    maximum = max(values)
+    return {
+        "count": len(values),
+        "mean_mb": statistics.mean(values),
+        "median_mb": statistics.median(values),
+        "p95_mb": percentile(values, 0.95),
+        "min_mb": min(values),
+        "max_mb": maximum,
+
+        # Population standard deviation is for all measurements in this experiment
+        "std_mb": statistics.pstdev(values) if len(values) > 1 else 0.0,
+        "mean_budget_pct": 100 * statistics.mean(values) / MEMORY_LIMIT_MB,
+        "max_budget_pct": 100 * maximum / MEMORY_LIMIT_MB,
+        "max_headroom_mb": MEMORY_LIMIT_MB - maximum,
+        "games_over_budget": sum(value > MEMORY_LIMIT_MB for value in values),
+        "games_over_budget_pct": 100 * sum(value > MEMORY_LIMIT_MB for value in values) / len(values),
+    }
+
+
 # Extract statistics
 
 def analyze_records(records):
@@ -129,6 +194,11 @@ def analyze_records(records):
         "piece_sizes": Counter(),
         "move_type_by_size": Counter(),
         "opponents": Counter(),
+        "memory_samples": [],
+        "memory_by_seat": {1: [], 2: []},
+        "memory_games_by_seat": {1: 0, 2: 0},
+        "memory_missing_by_seat": {1: 0, 2: 0},
+        "memory_records": [],
         "ignored_records": 0,
         "ignored_record_details": [],
     }
@@ -158,7 +228,11 @@ def analyze_records(records):
         outcome, points = get_outcome(winner, agent_seat)
         reason = record.get("reason", "unknown")
         opponent_seat = "2" if agent_seat == 1 else "1"
-        opponent_name = record.get("players", {}).get(opponent_seat, {}).get("agent", "unknown")
+        opponent_info = record.get("players", {}).get(opponent_seat, {})
+        opponent_name = (
+            opponent_info.get("agent", "unknown")
+            if isinstance(opponent_info, dict) else "unknown"
+        )
 
         stats["games"] += 1
         outcome_key = {"win": "wins", "draw": "draws", "loss": "losses"}[outcome]
@@ -173,6 +247,29 @@ def analyze_records(records):
         stats["strikes"] += record.get("strikes", {}).get(str(agent_seat), 0)
         if outcome == "loss" and reason in FORFEIT_REASONS:
             stats["forfeits"] += 1
+
+        # Get the agent's peak resident memory for this game
+        memory_mb = extract_memory_mb(record, agent_seat)
+        stats["memory_games_by_seat"][agent_seat] += 1
+        if memory_mb is None:
+            stats["memory_missing_by_seat"][agent_seat] += 1
+        else:
+            stats["memory_samples"].append(memory_mb)
+            stats["memory_by_seat"][agent_seat].append(memory_mb)
+
+        stats["memory_records"].append({
+            "record": record_index,
+            "seed": record.get("seed"),
+            "agent_seat": agent_seat,
+            "opponent": opponent_name,
+            "outcome": outcome,
+            "reason": reason,
+            "plies": record.get("plies"),
+            "max_rss_mb": memory_mb,
+            "memory_budget_pct": (
+                100 * memory_mb / MEMORY_LIMIT_MB if memory_mb is not None else None
+            ),
+        })
 
         # Break down results by starting obstacle and removed reserve-piece size
         obstacle = record.get("obstacle")
@@ -228,6 +325,13 @@ def analyze_records(records):
             progress_bin = min(int(progress * 10), 9)
             stats["progress_times"][progress_bin].append(agent_time)
 
+    stats["memory_missing_games"] = sum(stats["memory_missing_by_seat"].values())
+    stats["memory_metrics"] = get_memory_metrics(stats["memory_samples"])
+    stats["memory_metrics_by_seat"] = {
+        seat: get_memory_metrics(values)
+        for seat, values in stats["memory_by_seat"].items()
+    }
+
     return stats
 
 
@@ -243,6 +347,7 @@ def write_csv(filepath, rows, fieldnames):
 def build_summary_row(filename, stats):
     games = stats["games"]
     times = stats["times"]
+    memory = stats["memory_metrics"]
 
     opponents = ", ".join(sorted(stats["opponents"]))
 
@@ -265,7 +370,81 @@ def build_summary_row(filename, stats):
         "mean_game_plies": round(statistics.mean(stats["plies"]), 2) if stats["plies"] else None,
         "strikes": stats["strikes"],
         "forfeits": stats["forfeits"],
+        "memory_budget_mb": MEMORY_LIMIT_MB,
+        "memory_games_measured": memory["count"],
+        "memory_games_missing": stats["memory_missing_games"],
+        "memory_games_over_budget": memory["games_over_budget"],
+        "memory_games_over_budget_pct": round(memory["games_over_budget_pct"], 2),
+        "mean_memory_mb": round(memory["mean_mb"], 3) if memory["mean_mb"] is not None else None,
+        "median_memory_mb": round(memory["median_mb"], 3) if memory["median_mb"] is not None else None,
+        "p95_memory_mb": round(memory["p95_mb"], 3) if memory["p95_mb"] is not None else None,
+        "max_memory_mb": round(memory["max_mb"], 3) if memory["max_mb"] is not None else None,
+        "min_memory_mb": round(memory["min_mb"], 3) if memory["min_mb"] is not None else None,
+        "memory_std_mb": round(memory["std_mb"], 3) if memory["std_mb"] is not None else None,
+        "max_memory_budget_pct": round(memory["max_budget_pct"], 2) if memory["max_budget_pct"] is not None else None,
+        "memory_headroom_mb": round(memory["max_headroom_mb"], 3) if memory["max_headroom_mb"] is not None else None,
     }
+
+
+def write_memory_tables(output_dir, stats):
+    """Write per-game measurements and aggregate memory statistics."""
+    memory_game_fields = [
+        "record", "seed", "agent_seat", "opponent", "outcome", "reason",
+        "plies", "max_rss_mb", "memory_budget_pct",
+    ]
+    write_csv(
+        output_dir / "memory_by_game.csv",
+        stats["memory_records"],
+        memory_game_fields,
+    )
+
+    summary_rows = []
+    for scope, values, games, missing in [
+        (
+            "Overall",
+            stats["memory_samples"],
+            stats["games"],
+            stats["memory_missing_games"],
+        ),
+        (
+            "Student agent as P1",
+            stats["memory_by_seat"][1],
+            stats["memory_games_by_seat"][1],
+            stats["memory_missing_by_seat"][1],
+        ),
+        (
+            "Student agent as P2",
+            stats["memory_by_seat"][2],
+            stats["memory_games_by_seat"][2],
+            stats["memory_missing_by_seat"][2],
+        ),
+    ]:
+        metrics = get_memory_metrics(values)
+        summary_rows.append({
+            "scope": scope,
+            "games": games,
+            "games_measured": metrics["count"],
+            "games_missing": missing,
+            "memory_budget_mb": MEMORY_LIMIT_MB,
+            "mean_mb": round(metrics["mean_mb"], 3) if metrics["mean_mb"] is not None else None,
+            "median_mb": round(metrics["median_mb"], 3) if metrics["median_mb"] is not None else None,
+            "p95_mb": round(metrics["p95_mb"], 3) if metrics["p95_mb"] is not None else None,
+            "min_mb": round(metrics["min_mb"], 3) if metrics["min_mb"] is not None else None,
+            "max_mb": round(metrics["max_mb"], 3) if metrics["max_mb"] is not None else None,
+            "std_mb": round(metrics["std_mb"], 3) if metrics["std_mb"] is not None else None,
+            "mean_budget_pct": round(metrics["mean_budget_pct"], 2) if metrics["mean_budget_pct"] is not None else None,
+            "max_budget_pct": round(metrics["max_budget_pct"], 2) if metrics["max_budget_pct"] is not None else None,
+            "max_headroom_mb": round(metrics["max_headroom_mb"], 3) if metrics["max_headroom_mb"] is not None else None,
+            "games_over_budget": metrics["games_over_budget"],
+            "games_over_budget_pct": round(metrics["games_over_budget_pct"], 2),
+        })
+
+    write_csv(
+        output_dir / "memory_summary.csv",
+        summary_rows,
+        list(summary_rows[0].keys()),
+    )
+
 
 def write_breakdown_tables(output_dir, stats):
     obstacle_rows = []
@@ -349,6 +528,9 @@ def write_breakdown_tables(output_dir, stats):
     ]
     write_csv(output_dir / "move_flags.csv", flag_rows, ["flag", "count"])
 
+    write_memory_tables(output_dir, stats)
+
+
 def print_summary(row):
     print("\n" + "=" * 78)
     print(f"EXPERIMENT: {row['experiment']}")
@@ -365,6 +547,14 @@ def print_summary(row):
           f"max {row['max_step_time_s']}")
     print(f"Mean game length: {row['mean_game_plies']} plies | "
           f"Strikes: {row['strikes']} | Forfeits: {row['forfeits']}")
+    print(
+        f"Peak RSS memory (MB): mean {row['mean_memory_mb']} | "
+        f"median {row['median_memory_mb']} | p95 {row['p95_memory_mb']} | "
+        f"max {row['max_memory_mb']} / {MEMORY_LIMIT_MB:.0f} MB "
+        f"({row['max_memory_budget_pct']}% of budget) | "
+        f"over-budget games {row['memory_games_over_budget']} | "
+        f"missing {row['memory_games_missing']}"
+    )
 
 
 # Plots
@@ -395,28 +585,17 @@ def save_phase_boxplot(phase_times, output_dir):
     values = [phase_times[phase] for phase in labels]
 
     fig, ax = plt.subplots(figsize=(8, 5))
-
-    # Create the boxplot
     ax.boxplot(values, showfliers=False)
-
-    # Set the labels underneath each box
     ax.set_xticks(range(1, len(labels) + 1), labels=labels)
-
     ax.axhline(
         STEP_TIME_LIMIT,
         linestyle="--",
         linewidth=2,
         label=f"{STEP_TIME_LIMIT:.1f}s soft limit"
     )
-
-    ax.set(
-        title="Agent move time by game phase",
-        ylabel="Agent time (seconds)"
-    )
-
+    ax.set(title="Agent move time by game phase", ylabel="Agent time (seconds)")
     ax.legend()
     ax.grid(axis="y", alpha=0.25)
-
     fig.tight_layout()
     fig.savefig(output_dir / "step_time_by_phase.png", dpi=160)
     plt.close(fig)
@@ -557,6 +736,109 @@ def save_ending_reason_plot(reasons, output_dir):
     fig.savefig(output_dir / "ending_reasons.png", dpi=160)
     plt.close(fig)
 
+def save_memory_distribution(memory_values, output_dir):
+    if not memory_values:
+        return
+
+    metrics = get_memory_metrics(memory_values)
+    bins = min(20, max(5, math.ceil(math.sqrt(len(memory_values)))))
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(memory_values, bins=bins, edgecolor="black")
+    ax.axvline(metrics["mean_mb"], linestyle="--", linewidth=2,
+               label=f"Mean: {metrics['mean_mb']:.2f} MB")
+    ax.axvline(metrics["max_mb"], linestyle=":", linewidth=2,
+               label=f"Maximum: {metrics['max_mb']:.2f} MB")
+    ax.set(
+        title="Student agent peak resident memory distribution",
+        xlabel="Peak resident memory per game (MB)",
+        ylabel="Number of games",
+    )
+    ax.text(
+        0.98, 0.95,
+        f"Budget: {MEMORY_LIMIT_MB:.0f} MB\n"
+        f"Samples: {metrics['count']}\n"
+        f"95th percentile: {metrics['p95_mb']:.2f} MB",
+        transform=ax.transAxes, ha="right", va="top",
+        bbox={"boxstyle": "round", "alpha": 0.12},
+    )
+    ax.legend()
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_dir / "memory_usage_distribution.png", dpi=160)
+    plt.close(fig)
+
+def save_memory_budget_plot(memory_values, output_dir):
+    if not memory_values:
+        return
+
+    metrics = get_memory_metrics(memory_values)
+    labels = ["Mean", "Median", "95th percentile", "Maximum"]
+    values_mb = [
+        metrics["mean_mb"], metrics["median_mb"],
+        metrics["p95_mb"], metrics["max_mb"],
+    ]
+    values_pct = [100 * value / MEMORY_LIMIT_MB for value in values_mb]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar(labels, values_pct)
+    ax.axhline(100, linestyle="--", linewidth=2, label="Memory budget (100%)")
+    for bar, value_mb, value_pct in zip(bars, values_mb, values_pct):
+        ax.annotate(
+            f"{value_mb:.2f} MB\n{value_pct:.2f}%",
+            (bar.get_x() + bar.get_width() / 2, bar.get_height()),
+            xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8,
+        )
+    upper = max(110, max(values_pct, default=0) * 1.2)
+    ax.set(
+        title="Student agent memory usage relative to budget",
+        ylabel=f"Memory budget used (%) — {MEMORY_LIMIT_MB:.0f} MB budget",
+        ylim=(0, upper),
+    )
+    ax.legend()
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_dir / "memory_budget_usage.png", dpi=160)
+    plt.close(fig)
+
+def save_memory_by_game_plot(memory_records, output_dir):
+    measured = [record for record in memory_records if record["max_rss_mb"] is not None]
+    if not measured:
+        return
+
+    game_numbers = [record["record"] for record in measured]
+    memory_values = [record["max_rss_mb"] for record in measured]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.plot(game_numbers, memory_values, marker="o", linestyle="-")
+    ax.set(
+        title="Student agent peak resident memory by game",
+        xlabel="Record number in result file",
+        ylabel="Peak resident memory (MB)",
+    )
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_dir / "memory_usage_by_game.png", dpi=160)
+    plt.close(fig)
+
+def save_memory_by_seat_plot(memory_by_seat, output_dir):
+    seats = [seat for seat in (1, 2) if memory_by_seat[seat]]
+    if not seats:
+        return
+
+    values = [memory_by_seat[seat] for seat in seats]
+    labels = [f"Student as P{seat}" for seat in seats]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.boxplot(values, labels=labels, showfliers=True)
+    ax.set(
+        title="Student agent peak memory by player seat",
+        ylabel="Peak resident memory (MB)",
+    )
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_dir / "memory_usage_by_seat.png", dpi=160)
+    plt.close(fig)
+
 def make_plots(stats, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
     save_time_histogram(stats["times"], output_dir)
@@ -567,6 +849,10 @@ def make_plots(stats, output_dir):
     save_move_type_plot(stats["move_types"], output_dir)
     save_piece_size_plot(stats["piece_sizes"], output_dir)
     save_ending_reason_plot(stats["reasons"], output_dir)
+    save_memory_distribution(stats["memory_samples"], output_dir)
+    save_memory_budget_plot(stats["memory_samples"], output_dir)
+    save_memory_by_game_plot(stats["memory_records"], output_dir)
+    save_memory_by_seat_plot(stats["memory_by_seat"], output_dir)
 
 
 # Main program
@@ -597,6 +883,12 @@ def main():
         if stats["games"] == 0:
             print(f"Skipping {filepath.name}: no completed games involving student_agent.")
             continue
+
+        if stats["memory_missing_games"]:
+            print(
+                f"Warning: {stats['memory_missing_games']} game(s) in {filepath.name} "
+                "had no valid max_rss_mb measurement for student_agent."
+            )
 
         summary = build_summary_row(filepath.name, stats)
         summary_rows.append(summary)
