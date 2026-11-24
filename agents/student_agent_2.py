@@ -10,8 +10,9 @@ import json
 
 MAX_DEPTH = 10
 WIN = 10 ** 6   # score heuristic value
-
 MARGIN = 0.2    # TODO: establish a good margin (do this at the end)
+PIECE_WEIGHT = (1, 3, 6)  # for small, medium & large pieces in reserve, we can tweak this later
+
 class SearchTimeout(Exception): pass
 
 LINES = ([[(i, j) for j in range(BOARD_SIZE)] for i in range(BOARD_SIZE)] + # 4 rows
@@ -87,7 +88,7 @@ class StudentAgent(Agent):
         """Set up your agent. This runs once per game, before the first move, and must finish
         within INIT_TIME_LIMIT seconds."""
         super().__init__()
-        self.name = "StudentAgent2"
+        self.name = "StudentAgent"
         self.turn_count = 0
 
         # TODO: Take advantage of this 30 seconds to set up agent
@@ -109,10 +110,10 @@ class StudentAgent(Agent):
         self.turn_count += 1
 
         deadline = start + STEP_TIME_LIMIT - MARGIN
-        def check_time(): 
+        def check_time():
             if time.perf_counter() >= deadline: raise SearchTimeout()
 
-        # TODO: currently does not consider piece sizes & reserves
+
         def evaluate(board, reserves, player, opponent):
             check_time()
 
@@ -129,6 +130,7 @@ class StudentAgent(Agent):
                 elif opp and not mine:
                     score -= 10 ** opp
             return score
+
 
         def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply, stats):
             check_time()
@@ -156,8 +158,7 @@ class StudentAgent(Agent):
 
             check_time()
             valid_moves = get_valid_moves(board, reserves, current_player)
-            # TODO: Cut moves that are probably not getting chosen. 
-            # Maybe sort by evaluation function output value and cut after a certain threshold.
+            # TODO: Order moves to paximize pruning
 
             check_time()
             if depth == 0 or not valid_moves:
@@ -174,7 +175,7 @@ class StudentAgent(Agent):
             stats["expanded_nodes"] += 1
             stats["legal_moves_generated"] += len(valid_moves)
             stats["max_branching_factor"] = max(stats["max_branching_factor"], len(valid_moves))
-                
+
             if maximizing:
                 for move_index, move in enumerate(valid_moves, start=1):
                     check_time()
@@ -182,7 +183,7 @@ class StudentAgent(Agent):
                     execute_move(b, r, current_player, move)
                     value = alphabeta(b, r, player, opponent, depth-1, alpha, beta, False, ply + 1, stats)
                     alpha = max(alpha, value)
-                    if alpha >= beta: 
+                    if alpha >= beta:
                         stats["alpha_beta_cutoffs"] += 1
                         stats["children_pruned"] += len(valid_moves) - move_index
                         stats["cutoff_move_index_sum"] += move_index
@@ -196,7 +197,7 @@ class StudentAgent(Agent):
                     b, r = copy_state(board, reserves)
                     execute_move(b, r, current_player, move)
                     beta = min(beta, alphabeta(b, r, player, opponent, depth - 1, alpha, beta, True, ply + 1, stats))
-                    if alpha >= beta: 
+                    if alpha >= beta:
                         stats["alpha_beta_cutoffs"] += 1
                         stats["children_pruned"] += len(valid_moves) - move_index
                         stats["cutoff_move_index_sum"] += move_index
@@ -205,20 +206,21 @@ class StudentAgent(Agent):
                         return alpha
                 return beta
 
-        def get_best_move(board, reserves, player, opponent, depth, stats):
+        def get_best_move(board, reserves, player, opponent, depth, stats, available_scores):
             best_val, best_move = -np.inf, None
             timed_out = False
 
             root_moves = get_valid_moves(board, reserves, player)
+
+            root_moves.sort(key=lambda m: available_scores.get(repr(m), (None, -np.inf, depth))[1], reverse=True)
+
             stats["root_legal_moves"] = len(root_moves)
 
             for move in root_moves:
-                # TODO: Cut moves that are probably not getting chosen. 
-                # Maybe sort by evaluation function output value and cut after a certain threshold.
 
                 try:
                     check_time()
-                
+
                     stats["root_moves_started"] += 1
 
                     b, r = copy_state(board, reserves)
@@ -239,6 +241,9 @@ class StudentAgent(Agent):
 
                 stats["root_moves_considered"] += 1
 
+                # Update this move's latest fully evaluated score.
+                available_scores[repr(move)] = (move, val, depth)
+
                 stats["root_move_scores"].append({
                     "move": repr(move),
                     "score": float(val),
@@ -257,7 +262,7 @@ class StudentAgent(Agent):
 
             return best_val, best_move, not timed_out
 
-        # TODO: Want the val of a move to be the deepest (a move can look good at depth 1 but bad at depth 3)
+        # IDS where we update the val of each move at each depth
         best_val, best_move = -np.inf, None
         best_move_depth = None
 
@@ -265,6 +270,7 @@ class StudentAgent(Agent):
         completed_depth = 0
         attempted_depth = None
         timed_out = False
+        available_scores = {}
 
         for depth in range(2, MAX_DEPTH + 1):
             iteration_start = time.perf_counter()
@@ -273,7 +279,7 @@ class StudentAgent(Agent):
 
             try:
                 check_time()
-                val, move, iteration_completed = get_best_move(board, reserves, player, opponent, depth, stats)
+                val, move, iteration_completed = get_best_move(board, reserves, player, opponent, depth, stats, available_scores)
 
             except SearchTimeout:
                 # Timeout happened before get_best_move could start
@@ -292,9 +298,8 @@ class StudentAgent(Agent):
                 # Depth didnt complete, only use result if better than previous depth's best move
                 timed_out = True
 
-                if move is not None and val > best_val:
-                    best_val, best_move = val, move
-                    best_move_depth = depth
+                if available_scores:
+                    best_move, best_val, best_move_depth = max(available_scores.values(), key=lambda x: x[1])
 
                 stats["completed"] = False
 

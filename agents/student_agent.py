@@ -247,7 +247,7 @@ class StudentAgent(Agent):
                     elif winner == opponent:
                         val = -WIN - depth
                     else:
-                        val = alphabeta(b, r, player, opponent, depth-1, best_val, np.inf, False, root_ply + 1, stats)
+                        val = alphabeta(b, r, player, opponent, depth-1, -np.inf, np.inf, False, root_ply + 1, stats)
 
                 except SearchTimeout:
                     # This root move wasnt fully evaluated
