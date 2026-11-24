@@ -132,7 +132,7 @@ class StudentAgent(Agent):
                 for owner, size in cells:
                     if owner == opp and size >= biggest_piece(player):
                         return 0 # opp piece that cannot be covered blocks the whole line
-                    else:
+                    elif owner == player:
                         # a coverable piece is slightly less valuable
                         value += 1 if size >= biggest_piece(opp) else 0.75 # can tweak later
                 return 10 ** value
