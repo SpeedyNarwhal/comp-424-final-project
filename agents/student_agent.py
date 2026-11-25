@@ -93,6 +93,8 @@ class StudentAgent(Agent):
 
         # TODO: Take advantage of this 30 seconds to set up agent
 
+        self.eval_cache = {} # Store values of eval for lookup
+
     def step(self, board, reserves, player, opponent):
         """Return the Move you want to play.
 
@@ -113,9 +115,16 @@ class StudentAgent(Agent):
         def check_time():
             if time.perf_counter() >= deadline: raise SearchTimeout()
 
-
+        eval_cache = self.eval_cache
         def evaluate(board, reserves, player, opponent):
             check_time()
+
+            # Look up value of eval for given state
+            key = (board.tobytes(), reserves.tobytes(), player, opponent)
+            val = eval_cache.get(key)
+            if val is not None:
+                return val
+
             owners, sizes = top_view(board)
 
             def biggest_piece(player):
@@ -144,6 +153,7 @@ class StudentAgent(Agent):
                     playerScore = line_score(player, opponent, cells)
                     oppScore = line_score(opponent, player, cells)
                     score += playerScore - oppScore
+            eval_cache[key] = score
             return score
 
 
