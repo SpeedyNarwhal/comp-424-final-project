@@ -1,0 +1,2 @@
+experiment,agent_log_files,search_decisions,malformed_search_lines,timed_out_decisions,decision_timeout_pct,partial_depth_choices,partial_depth_choice_pct,immediate_win_iterations,random_fallback_decisions,mean_completed_depth,mean_chosen_move_depth,mean_search_time_s,median_search_time_s,p95_search_time_s,max_search_time_s,mean_nodes_per_decision,total_nodes_across_decisions,iterations,completed_iterations,timed_out_iterations
+student_agent_vs_student_agent_2_seed9057,50,1872,0,1834,97.97,1806,96.47,6,0,2.158,3.123,1.7693,1.8001,1.8003,1.8023,4639.81,8685728,4003,2169,1834

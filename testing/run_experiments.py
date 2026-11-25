@@ -89,6 +89,6 @@ if __name__ == "__main__":
 
     #run_simulation("student_agent", "random_agent", num_runs=10, seed=seed)
 
-    run_simulation("student_agent", "greedy_agent", num_runs=4, seed=seed)
+    run_simulation("student_agent", "greedy_agent", num_runs=50, seed=seed)
 
-    #run_simulation("student_agent", "student_agent_2", num_runs=6, seed=seed)
+    run_simulation("student_agent", "student_agent_2", num_runs=50, seed=seed)

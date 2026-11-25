@@ -1,0 +1,4 @@
+removed_piece_size,games,seed_configurations,wins,draws,losses,match_points_pct
+Small,16,8,16,0,0,100.0
+Medium,20,10,20,0,0,100.0
+Large,14,7,13,1,0,96.43
