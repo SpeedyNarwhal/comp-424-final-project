@@ -93,8 +93,6 @@ class StudentAgent(Agent):
 
         # TODO: Take advantage of this 30 seconds to set up agent
 
-        self.eval_cache = {} # Store values of eval for lookup
-
     def step(self, board, reserves, player, opponent):
         """Return the Move you want to play.
 
@@ -115,16 +113,8 @@ class StudentAgent(Agent):
         def check_time():
             if time.perf_counter() >= deadline: raise SearchTimeout()
 
-        eval_cache = self.eval_cache
-        def evaluate(board, reserves, player, opponent):
+        def evaluate(board, reserves, player, opponent, current):
             check_time()
-
-            # Look up value of eval for given state
-            key = (board.tobytes(), reserves.tobytes(), player, opponent)
-            val = eval_cache.get(key)
-            if val is not None:
-                return val
-
             owners, sizes = top_view(board)
 
             def biggest_piece(player):
@@ -135,27 +125,44 @@ class StudentAgent(Agent):
                     usable += sizes[owners == player].tolist()
                 return max(usable, default=-1) # -1 if no valid moves
 
-            def line_score(player, opp, cells):
+            biggest_pieces = {player: biggest_piece(player), opponent: biggest_piece(opponent)}
+
+            def line_score(player, opponent, cells):
                 """Value of a line for player."""
                 value = 0
+                count = 0
                 for owner, size in cells:
-                    if owner == opp and size >= biggest_piece(player):
-                        return 0 # opp piece that cannot be covered blocks the whole line
+                    if owner == opponent and size >= biggest_pieces[player]:
+                        return 0, count # opp piece that cannot be covered blocks the whole line
                     elif owner == player:
                         # a coverable piece is slightly less valuable
-                        value += 1 if size >= biggest_piece(opp) else 0.75 # can tweak later
-                return 10 ** value
+                        value += 1 if size >= biggest_pieces[opponent] else 0.75 # can tweak later
+                        count += 1
+                return 10 ** value, count
 
-            score = np.dot(reserves[player] - reserves[opponent], PIECE_WEIGHT)
+            score = 0
+            pThreats = 0
+            oThreats = 0
             for line in LINES:
                 cells = [(owners[row, col], sizes[row, col]) for row, col in line]
                 if all(owner != OBSTACLE for owner, _ in cells):
-                    playerScore = line_score(player, opponent, cells)
-                    oppScore = line_score(opponent, player, cells)
+                    playerScore, playerCount = line_score(player, opponent, cells)
+                    oppScore, oppCount = line_score(opponent, player, cells)
                     score += playerScore - oppScore
-            eval_cache[key] = score
-            return score
 
+                    if playerScore > 0 and playerCount == WIN_LENGTH - 1: pThreats += 1
+                    if oppScore > 0 and oppCount == WIN_LENGTH - 1: oThreats += 1
+
+            THREAT_SCORE = WIN / 10
+
+            if current == player:
+                if pThreats: score += THREAT_SCORE
+                elif oThreats >= 2: score -= THREAT_SCORE
+            else:
+                if oThreats: score -= THREAT_SCORE
+                elif pThreats >= 2: score += THREAT_SCORE
+
+            return score
 
         def alphabeta(board, reserves, player, opponent, depth, alpha, beta, maximizing, ply, stats):
             check_time()
@@ -194,7 +201,7 @@ class StudentAgent(Agent):
                 else:
                     stats["no_move_leaves"] += 1
 
-                return evaluate(board, reserves, player, opponent)
+                return evaluate(board, reserves, player, opponent, current_player)
 
             # Position is being expanded
             stats["expanded_nodes"] += 1
