@@ -22,9 +22,8 @@ def count_existing_records(filepath):
     with filepath.open("r", encoding="utf-8") as file:
         return sum(1 for line in file if line.strip())
 
-def copy_student_logs(filepath, first_new_record):
+def copy_agent_logs(filepath, first_new_record, target_agent):
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
     copied = 0
 
     with filepath.open("r", encoding="utf-8") as file:
@@ -33,17 +32,25 @@ def copy_student_logs(filepath, first_new_record):
                 continue
 
             record = json.loads(line)
+            players = record.get("players", {})
+            log_paths = record.get("log_paths", {})
 
             for seat in ("1", "2"):
-                agent = record.get("players", {}).get(seat, {}).get("agent")
+                player_info = players.get(seat, {})
+                agent_name = (
+                    player_info.get("agent")
+                    if isinstance(player_info, dict) else None
+                )
 
-                if agent != "student_agent":
+                if agent_name != target_agent:
                     continue
 
-                log_path = record.get("log_paths", {}).get(seat)
-
+                log_path = log_paths.get(seat)
                 if not log_path:
-                    print(f"No log path found for game {record_index + 1}, seat {seat}.")
+                    print(
+                        f"No log path found for {target_agent}, "
+                        f"game {record_index + 1}, seat {seat}."
+                    )
                     continue
 
                 source = Path(log_path)
@@ -69,26 +76,34 @@ def run_simulation(player, opponent, num_runs, seed):
     # Remember how many records existed before this experiment.
     first_new_record = count_existing_records(output_file)
 
-    simulator.main(["--player_1", player, 
-                    "--player_2", opponent, 
-                    "--seed", str(seed),
-                    "--autoplay",
-                    "--autoplay_runs", str(num_runs),
-                    "--strict",
-                    "--json", str(output_file),])
+    print(
+        f"\nRunning {player} vs {opponent}: "
+        f"{num_runs} game(s), seed={seed}"
+    )
+    simulator.main([
+        "--player_1", player,
+        "--player_2", opponent,
+        "--seed", str(seed),
+        "--autoplay",
+        "--autoplay_runs", str(num_runs),
+        "--strict",
+        "--json", str(output_file),
+    ])
 
-    # Copy the student agent's logs out of the temporary directory.
-    copied = copy_student_logs(output_file, first_new_record)
+    # The first agent named in the experiment is the focal agent for analysis
+    copied = copy_agent_logs(output_file, first_new_record, target_agent=player)
 
     print(f"Simulation complete. Results saved to {output_file}.")
-    print(f"Copied {copied} student agent logs to {LOGS_DIR}.")
+    print(f"Copied {copied} {player} log(s) to {LOGS_DIR}.")
+
+
 
 if __name__ == "__main__":
-
+    
     seed = random.randint(0, 10000)
+    num_runs = 2
 
-    #run_simulation("student_agent", "random_agent", num_runs=10, seed=seed)
+    run_simulation("student_agent", "greedy_agent", num_runs=num_runs, seed=seed)
 
-    run_simulation("student_agent", "greedy_agent", num_runs=50, seed=seed)
+    run_simulation("student_agent_2", "greedy_agent", num_runs=num_runs, seed=seed)
 
-    run_simulation("student_agent", "student_agent_2", num_runs=50, seed=seed)

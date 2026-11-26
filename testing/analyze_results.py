@@ -57,14 +57,23 @@ def load_records(filepath):
 
     return records
 
-def get_agent_seat(record):
+def infer_target_agent(filepath):
+    """Infer the agent being evaluated from '<agent>_vs_<opponent>_seed<N>'."""
+    stem = filepath.stem
+    if "_vs_" not in stem:
+        return None
+    return stem.split("_vs_", 1)[0]
+
+
+def get_agent_seat(record, target_agent):
+    """Return the seat occupied by the agent being evaluated in this record."""
     players = record.get("players")
     if not isinstance(players, dict):
         return None
 
     for seat in ("1", "2"):
         player_info = players.get(seat)
-        if isinstance(player_info, dict) and player_info.get("agent") == "student_agent":
+        if isinstance(player_info, dict) and player_info.get("agent") == target_agent:
             return int(seat)
     return None
 
@@ -169,8 +178,10 @@ def get_memory_metrics(values):
 
 # Extract statistics
 
-def analyze_records(records):
+def analyze_records(records, target_agent="student_agent"):
     stats = {
+        "agent": target_agent,
+        "seeds": set(),
         "games": 0,
         "wins": 0,
         "draws": 0,
@@ -204,7 +215,7 @@ def analyze_records(records):
     }
 
     for record_index, record in enumerate(records, start=1):
-        agent_seat = get_agent_seat(record)
+        agent_seat = get_agent_seat(record, target_agent)
 
         if agent_seat is None:
             stats["ignored_records"] += 1
@@ -235,6 +246,8 @@ def analyze_records(records):
         )
 
         stats["games"] += 1
+        if record.get("seed") is not None:
+            stats["seeds"].add(record["seed"])
         outcome_key = {"win": "wins", "draw": "draws", "loss": "losses"}[outcome]
         stats[outcome_key] += 1
         stats["points"] += points
@@ -350,10 +363,13 @@ def build_summary_row(filename, stats):
     memory = stats["memory_metrics"]
 
     opponents = ", ".join(sorted(stats["opponents"]))
+    seeds = ", ".join(str(seed) for seed in sorted(stats["seeds"], key=str))
 
     return {
         "experiment": filename,
+        "agent": stats["agent"],
         "opponent(s)": opponents,
+        "seed(s)": seeds,
         "games": games,
         "wins": stats["wins"],
         "draws": stats["draws"],
@@ -407,13 +423,13 @@ def write_memory_tables(output_dir, stats):
             stats["memory_missing_games"],
         ),
         (
-            "Student agent as P1",
+            f"{stats['agent']} as P1",
             stats["memory_by_seat"][1],
             stats["memory_games_by_seat"][1],
             stats["memory_missing_by_seat"][1],
         ),
         (
-            "Student agent as P2",
+            f"{stats['agent']} as P2",
             stats["memory_by_seat"][2],
             stats["memory_games_by_seat"][2],
             stats["memory_missing_by_seat"][2],
@@ -534,7 +550,7 @@ def write_breakdown_tables(output_dir, stats):
 def print_summary(row):
     print("\n" + "=" * 78)
     print(f"EXPERIMENT: {row['experiment']}")
-    print(f"Opponent(s): {row['opponent(s)']}")
+    print(f"Agent: {row['agent']} | Opponent(s): {row['opponent(s)']} | Seed(s): {row['seed(s)']}")
     print("=" * 78)
     print(f"Games: {row['games']} | W-D-L: "
           f"{row['wins']}-{row['draws']}-{row['losses']} | "
@@ -736,7 +752,7 @@ def save_ending_reason_plot(reasons, output_dir):
     fig.savefig(output_dir / "ending_reasons.png", dpi=160)
     plt.close(fig)
 
-def save_memory_distribution(memory_values, output_dir):
+def save_memory_distribution(memory_values, output_dir, agent_name):
     if not memory_values:
         return
 
@@ -749,7 +765,7 @@ def save_memory_distribution(memory_values, output_dir):
     ax.axvline(metrics["max_mb"], linestyle=":", linewidth=2,
                label=f"Maximum: {metrics['max_mb']:.2f} MB")
     ax.set(
-        title="Student agent peak resident memory distribution",
+        title=f"{agent_name} peak resident memory distribution",
         xlabel="Peak resident memory per game (MB)",
         ylabel="Number of games",
     )
@@ -767,7 +783,7 @@ def save_memory_distribution(memory_values, output_dir):
     fig.savefig(output_dir / "memory_usage_distribution.png", dpi=160)
     plt.close(fig)
 
-def save_memory_budget_plot(memory_values, output_dir):
+def save_memory_budget_plot(memory_values, output_dir, agent_name):
     if not memory_values:
         return
 
@@ -790,7 +806,7 @@ def save_memory_budget_plot(memory_values, output_dir):
         )
     upper = max(110, max(values_pct, default=0) * 1.2)
     ax.set(
-        title="Student agent memory usage relative to budget",
+        title=f"{agent_name} memory usage relative to budget",
         ylabel=f"Memory budget used (%) — {MEMORY_LIMIT_MB:.0f} MB budget",
         ylim=(0, upper),
     )
@@ -800,7 +816,7 @@ def save_memory_budget_plot(memory_values, output_dir):
     fig.savefig(output_dir / "memory_budget_usage.png", dpi=160)
     plt.close(fig)
 
-def save_memory_by_game_plot(memory_records, output_dir):
+def save_memory_by_game_plot(memory_records, output_dir, agent_name):
     measured = [record for record in memory_records if record["max_rss_mb"] is not None]
     if not measured:
         return
@@ -811,7 +827,7 @@ def save_memory_by_game_plot(memory_records, output_dir):
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.plot(game_numbers, memory_values, marker="o", linestyle="-")
     ax.set(
-        title="Student agent peak resident memory by game",
+        title=f"{agent_name} peak resident memory by game",
         xlabel="Record number in result file",
         ylabel="Peak resident memory (MB)",
     )
@@ -820,18 +836,18 @@ def save_memory_by_game_plot(memory_records, output_dir):
     fig.savefig(output_dir / "memory_usage_by_game.png", dpi=160)
     plt.close(fig)
 
-def save_memory_by_seat_plot(memory_by_seat, output_dir):
+def save_memory_by_seat_plot(memory_by_seat, output_dir, agent_name):
     seats = [seat for seat in (1, 2) if memory_by_seat[seat]]
     if not seats:
         return
 
     values = [memory_by_seat[seat] for seat in seats]
-    labels = [f"Student as P{seat}" for seat in seats]
+    labels = [f"{agent_name} as P{seat}" for seat in seats]
 
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.boxplot(values, labels=labels, showfliers=True)
     ax.set(
-        title="Student agent peak memory by player seat",
+        title=f"{agent_name} peak memory by player seat",
         ylabel="Peak resident memory (MB)",
     )
     ax.grid(axis="y", alpha=0.25)
@@ -849,10 +865,11 @@ def make_plots(stats, output_dir):
     save_move_type_plot(stats["move_types"], output_dir)
     save_piece_size_plot(stats["piece_sizes"], output_dir)
     save_ending_reason_plot(stats["reasons"], output_dir)
-    save_memory_distribution(stats["memory_samples"], output_dir)
-    save_memory_budget_plot(stats["memory_samples"], output_dir)
-    save_memory_by_game_plot(stats["memory_records"], output_dir)
-    save_memory_by_seat_plot(stats["memory_by_seat"], output_dir)
+    agent_name = stats["agent"]
+    save_memory_distribution(stats["memory_samples"], output_dir, agent_name)
+    save_memory_budget_plot(stats["memory_samples"], output_dir, agent_name)
+    save_memory_by_game_plot(stats["memory_records"], output_dir, agent_name)
+    save_memory_by_seat_plot(stats["memory_by_seat"], output_dir, agent_name)
 
 
 # Main program
@@ -869,25 +886,33 @@ def main():
     analyzed_result_files = []
 
     for filepath in result_files:
+        target_agent = infer_target_agent(filepath)
+        if target_agent is None:
+            print(
+                f"Skipping {filepath.name}: cannot infer the target agent. "
+                "Name result files '<agent>_vs_<opponent>_seed<seed>.jsonl'."
+            )
+            continue
+
         records = load_records(filepath)
-        stats = analyze_records(records)
+        stats = analyze_records(records, target_agent=target_agent)
 
         if stats["ignored_records"]:
             print(
                 f"Warning: ignored {stats['ignored_records']} record(s) in "
-                f"{filepath.name} because they did not contain student_agent."
+                f"{filepath.name} because they did not contain {target_agent}."
             )
             for detail in stats["ignored_record_details"]:
                 print(f"  Record {detail['record']}: players={detail['players']}")
 
         if stats["games"] == 0:
-            print(f"Skipping {filepath.name}: no completed games involving student_agent.")
+            print(f"Skipping {filepath.name}: no completed games involving {target_agent}.")
             continue
 
         if stats["memory_missing_games"]:
             print(
                 f"Warning: {stats['memory_missing_games']} game(s) in {filepath.name} "
-                "had no valid max_rss_mb measurement for student_agent."
+                f"had no valid max_rss_mb measurement for {target_agent}."
             )
 
         summary = build_summary_row(filepath.name, stats)

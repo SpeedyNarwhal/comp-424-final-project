@@ -1,4 +1,4 @@
-"""Analyze the search stats captured in the student agent's log files."""
+"""Analyze the search stats captured in the agent's log files."""
 
 import csv
 import json
@@ -41,6 +41,14 @@ def write_csv(filepath, rows, fieldnames):
 
 
 # Search-log analysis
+
+def infer_target_agent(result_filepath):
+    """Infer the agent being tested from '<agent>_vs_<opponent>_seed<N>'."""
+    stem = result_filepath.stem
+    if "_vs_" not in stem:
+        return None
+    return stem.split("_vs_", 1)[0]
+
 
 def load_search_logs(result_filepath):
     """Load SEARCH_STATS records from the copied logs for one experiment."""
@@ -235,7 +243,7 @@ def build_search_depth_rows(iteration_rows):
     return depth_rows
 
 
-def build_search_summary(experiment_name, search_records, log_file_count,
+def build_search_summary(agent_name, experiment_name, search_records, log_file_count,
                          malformed_lines, decision_rows, iteration_rows):
     """Build one compact summary row for an experiment's search behaviour."""
     elapsed_times = numeric_values(decision_rows, "elapsed_s")
@@ -257,6 +265,7 @@ def build_search_summary(experiment_name, search_records, log_file_count,
 
     return {
         "experiment": experiment_name,
+        "agent": agent_name,
         "agent_log_files": log_file_count,
         "search_decisions": decisions,
         "malformed_search_lines": malformed_lines,
@@ -367,19 +376,20 @@ def save_search_pruning_plot(depth_rows, output_dir):
 
 
 def write_search_analysis(experiment_name, result_filepath, output_dir):
+    agent_name = infer_target_agent(result_filepath) or "unknown agent"
     search_records, log_file_count, malformed_lines = load_search_logs(result_filepath)
 
     if not search_records:
         print(
-            f"No SEARCH_STATS records found for {experiment_name}. "
-            f"Looked for logs in: {AGENT_LOGS_DIR}"
+            f"No SEARCH_STATS records found for {agent_name} in {experiment_name}. "
+            f"Looked for copied logs in: {AGENT_LOGS_DIR}"
         )
         return None
 
     decision_rows, iteration_rows = analyze_search_records(search_records)
     depth_rows = build_search_depth_rows(iteration_rows)
     summary = build_search_summary(
-        experiment_name, search_records, log_file_count, malformed_lines,
+        agent_name, experiment_name, search_records, log_file_count, malformed_lines,
         decision_rows, iteration_rows
     )
 
@@ -417,7 +427,7 @@ def write_search_analysis(experiment_name, result_filepath, output_dir):
     save_search_time_plot(depth_rows, output_dir)
     save_search_pruning_plot(depth_rows, output_dir)
 
-    print("\nSearch analysis:")
+    print(f"\nSearch analysis for {agent_name}:")
     print(
         f"  Decisions: {summary['search_decisions']} | "
         f"Timeouts: {summary['timed_out_decisions']} "
